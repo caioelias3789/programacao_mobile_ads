@@ -1,0 +1,260 @@
+import kotlin.math.roundToLong
+
+fun fmt(valor: Double): String {
+    val centavos = (valor * 100).roundToLong()
+    val negativo = centavos < 0
+    val abs = if (negativo) -centavos else centavos
+    val inteiro = abs / 100
+    val resto = (abs % 100).toString().padStart(2, '0')
+    return (if (negativo) "-" else "") + "R$ $inteiro,$resto"
+}
+
+fun linha() = println("====================================")
+
+
+interface Tarifavel {
+    fun aplicarTaxaMensal()
+}
+
+interface Rentavel {
+    fun aplicarRendimento()
+}
+
+abstract class Conta(
+    val titular: String,
+    val numero: Int,
+    saldoInicial: Double = 0.0
+) {
+    // saldo só pode ser alterado por dentro da própria classe/subclasses
+    var saldo: Double = if (saldoInicial > 0) saldoInicial else 0.0
+        protected set
+
+    private val historico = mutableListOf<String>()
+
+  
+    abstract val tipo: String
+
+   
+    protected fun registrar(operacao: String) {
+        historico.add(operacao)
+    }
+
+    protected fun debitar(valor: Double): Boolean {
+        if (valor <= 0 || valor > saldo) return false
+        saldo -= valor
+        return true
+    }
+
+    protected fun creditar(valor: Double) {
+        saldo += valor
+    }
+
+    // ---- operações públicas ----
+    open fun depositar(valor: Double): Boolean {
+        if (valor <= 0) {
+            println("Depósito inválido! O valor deve ser maior que zero.")
+            return false
+        }
+        creditar(valor)
+        registrar("Depósito de ${fmt(valor)} realizado.")
+        println("Depósito realizado com sucesso!")
+        return true
+    }
+
+    open fun sacar(valor: Double): Boolean {
+        if (valor <= 0) {
+            println("Valor de saque inválido!")
+            return false
+        }
+        if (!debitar(valor)) {
+            println("Saldo insuficiente para realizar esta operação!")
+            return false
+        }
+        registrar("Saque de ${fmt(valor)} realizado.")
+        println("Saque realizado com sucesso!")
+        return true
+    }
+
+    fun transferir(destino: Conta, valor: Double): Boolean {
+        if (valor <= 0) {
+            println("Valor de transferência inválido!")
+            return false
+        }
+        if (!debitar(valor)) {
+            println("Saldo insuficiente para realizar esta operação!")
+            return false
+        }
+        destino.creditar(valor)
+        registrar("Transferência de ${fmt(valor)} enviada para a conta ${destino.numero}.")
+        destino.registrar("Transferência de ${fmt(valor)} recebida da conta $numero.")
+        println("Transferência realizada com sucesso!")
+        return true
+    }
+
+    fun consultarSaldo(): Double = saldo
+
+    open fun exibirDados() {
+        linha()
+        println("BANCO BYTEBANK EVOLUTION")
+        linha()
+        println("Cliente: $titular")
+        println("Conta: $numero ($tipo)")
+        println("Saldo Atual: ${fmt(saldo)}")
+    }
+
+    fun exibirHistorico() {
+        linha()
+        println("HISTÓRICO DE OPERAÇÕES - Conta $numero ($titular)")
+        linha()
+        if (historico.isEmpty()) {
+            println("Nenhuma operação registrada.")
+        } else {
+            historico.forEachIndexed { i, op -> println("${i + 1}. $op") }
+        }
+    }
+}
+
+// ---------- Conta Corrente: paga taxa mensal e taxa por saque ----------
+class ContaCorrente(
+    titular: String,
+    numero: Int,
+    saldoInicial: Double = 0.0,
+    private val taxaMensal: Double = 30.0,
+    private val taxaSaque: Double = 0.50
+) : Conta(titular, numero, saldoInicial), Tarifavel {
+
+    override val tipo = "Conta Corrente"
+
+    override fun sacar(valor: Double): Boolean {
+        val total = valor + taxaSaque
+        if (valor <= 0) {
+            println("Valor de saque inválido!")
+            return false
+        }
+        if (!debitar(total)) {
+            println("Saldo insuficiente para realizar esta operação!")
+            return false
+        }
+        registrar("Saque de ${fmt(valor)} realizado (taxa de ${fmt(taxaSaque)}).")
+        println("Saque realizado com sucesso!")
+        return true
+    }
+
+    override fun aplicarTaxaMensal() {
+        println("Aplicando taxa mensal...")
+        if (!debitar(taxaMensal)) {
+            println("Saldo insuficiente para cobrar a taxa mensal!")
+            return
+        }
+        registrar("Taxa mensal de ${fmt(taxaMensal)} cobrada.")
+        println("Novo saldo: ${fmt(saldo)}")
+    }
+}
+
+// ---------- Conta Poupança: rende juros, sem taxas ----------
+class ContaPoupanca(
+    titular: String,
+    numero: Int,
+    saldoInicial: Double = 0.0,
+    private val taxaRendimento: Double = 0.005 // 0,5% ao mês
+) : Conta(titular, numero, saldoInicial), Rentavel {
+
+    override val tipo = "Conta Poupança"
+
+    override fun aplicarRendimento() {
+        println("Aplicando rendimento mensal...")
+        val rendimento = saldo * taxaRendimento
+        creditar(rendimento)
+        registrar("Rendimento de ${fmt(rendimento)} creditado.")
+        println("Novo saldo: ${fmt(saldo)}")
+    }
+}
+
+// ---------- Conta Salário: número limitado de saques ----------
+class ContaSalario(
+    titular: String,
+    numero: Int,
+    saldoInicial: Double = 0.0,
+    private val limiteSaques: Int = 3
+) : Conta(titular, numero, saldoInicial) {
+
+    override val tipo = "Conta Salário"
+
+    private var saquesRealizados = 0
+
+    override fun sacar(valor: Double): Boolean {
+        if (saquesRealizados >= limiteSaques) {
+            println("Limite de $limiteSaques saques mensais atingido!")
+            return false
+        }
+        val ok = super.sacar(valor)
+        if (ok) saquesRealizados++
+        return ok
+    }
+
+    override fun exibirDados() {
+        super.exibirDados()
+        println("Saques utilizados: $saquesRealizados de $limiteSaques")
+    }
+}
+
+// ==========================================================
+//                          MAIN
+// ==========================================================
+fun main() {
+    // --- Criação das contas ---
+    val maria = ContaCorrente("Maria Silva", 1001, 2500.0)
+    val joao = ContaPoupanca("João Souza", 1002, 1000.0)
+    val ana = ContaSalario("Ana Lima", 1003, 800.0)
+
+    maria.exibirDados()
+
+    // --- Movimentações da conta corrente ---
+    println()
+    maria.depositar(500.0)      // válido
+    maria.depositar(-100.0)     // inválido: rejeitado
+    maria.sacar(200.0)          // válido
+    maria.sacar(999999.0)       // saldo insuficiente
+    maria.aplicarTaxaMensal()   // comportamento específico da Conta Corrente
+
+    // --- Transferência entre contas ---
+    println()
+    maria.transferir(joao, 100.0)
+
+    // --- Conta poupança: rendimento ---
+    println()
+    joao.exibirDados()
+    joao.aplicarRendimento()    // comportamento específico da Conta Poupança
+
+    // --- Conta salário: limite de saques ---
+    println()
+    ana.exibirDados()
+    ana.sacar(100.0)
+    ana.sacar(100.0)
+    ana.sacar(100.0)
+    ana.sacar(100.0)            
+
+    println()
+    linha()
+    println("RESUMO DE TODAS AS CONTAS")
+    linha()
+    val contas = listOf<Conta>(maria, joao, ana)
+    for (conta in contas) {
+        println("${conta.numero} - ${conta.titular} (${conta.tipo}): ${fmt(conta.saldo)}")
+    }
+
+    // Fechamento do mês
+    println()
+    println("--- Fechamento do mês ---")
+    for (conta in contas) {
+        when (conta) {
+            is Tarifavel -> conta.aplicarTaxaMensal()
+            is Rentavel -> conta.aplicarRendimento()
+            else -> println("Conta ${conta.numero}: sem taxas nem rendimento.")
+        }
+    }
+
+    // --- Históricos ---
+    println()
+    contas.forEach { it.exibirHistorico() }
+}
